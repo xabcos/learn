@@ -60,7 +60,7 @@ LEARN_TEST_DATABASE_URL=postgres://.../learn_test_check make integration-test
 
 ## 部署
 
-服务器上的 `~/1/learn` 放着 `docker-compose.yml` 和 `.env`（权限 600，存放 `AI_API_KEY`、`TMPFILE_API_KEY` 与 `LEARN_DB_PASSWORD`）。推送到 `main` 会构建 `proxyxai/learn:rust` 镜像；提交信息含 `prod` 时再部署到生产。网站监听 `127.0.0.1:8794`，由网关 nginx 以 `learn.xabcnews.com` 对外提供，Cloudflare 在前。
+服务器上的 `~/1/learn` 只放一份 `docker-compose.yml`：与仓库里的相同，`AI_API_KEY` 与 `TMPFILE_API_KEY` 直接写成实际的值。推送到 `main` 会构建 `proxyxai/learn:rust` 镜像；提交信息含 `prod` 时再部署到生产。网站监听 `127.0.0.1:8794`，由网关 nginx 以 `learn.xabcnews.com` 对外提供，Cloudflare 在前。
 
 ## 许可证
 

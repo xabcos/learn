@@ -1,5 +1,3 @@
-# learn.xabcnews.com. Secrets come from .env next to this file (mode 0600), never from here.
-# LEARN_DB_PASSWORD goes into DATABASE_URL as it is: letters and digits only.
 services:
   learn:
     container_name: learn
@@ -13,16 +11,16 @@ services:
       - "127.0.0.1:8794:8788"
     environment:
       TZ: Asia/Shanghai
-      DATABASE_URL: postgres://postgres:${LEARN_DB_PASSWORD:-learn}@learn-postgres:5432/learn?sslmode=disable
+      DATABASE_URL: postgres://postgres:io@learn-postgres:5432/learn?sslmode=disable
       PUBLIC_BASE_URL: https://learn.xabcnews.com
       LEARN_TIMEZONE: Asia/Shanghai
       LEARN_WRITER: ${LEARN_WRITER:-true}
-      AI_BASE_URL: ${AI_BASE_URL:-https://api.zairouter.com}
-      AI_API_KEY: ${AI_API_KEY}
+      AI_BASE_URL: https://api.zairouter.com
       AI_MODEL: ${AI_MODEL:-gpt-6-astra}
       AI_IMAGE_MODEL: ${AI_IMAGE_MODEL:-gpt-image-2.5-flare}
-      TMPFILE_BASE_URL: ${TMPFILE_BASE_URL:-https://dl.xabcnews.com}
+      TMPFILE_BASE_URL: https://dl.xabcnews.com
       TMPFILE_API_KEY: ${TMPFILE_API_KEY}
+      AI_API_KEY: ${AI_API_KEY}
     networks: [network]
 
   learn-postgres:
@@ -31,8 +29,11 @@ services:
     pull_policy: always
     restart: always
     environment:
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
       POSTGRES_DB: learn
-      POSTGRES_PASSWORD: ${LEARN_DB_PASSWORD:-learn}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: io
     volumes: [postgres_data:/var/lib/postgresql]
     networks: [network]
 
@@ -41,3 +42,4 @@ volumes:
 
 networks:
   network:
+    driver: bridge

@@ -243,7 +243,8 @@ async fn written(state: &AppState, course: &Course, since: DateTime<Utc>) -> Res
         review_days: plan.review_days(),
         turned: course.adjusted_at,
     };
-    let (id, number) = publish(state, course, chapter, upkeep, since, &finished).await?;
+    let after = lessons.last().map(|lesson| lesson.number);
+    let (id, number) = publish(state, course, chapter, after, upkeep, since, &finished).await?;
     log(id, "XABC's lesson written", course, &finished, &usage);
     Ok(Done {
         id,
@@ -593,12 +594,13 @@ struct Upkeep {
     turned: Option<DateTime<Utc>>,
 }
 
-/// Publishes the lesson with its pictures after the course's last, unless a lesson went out since
-/// `since` meanwhile.
+/// Publishes the lesson with its pictures after `after`, the course's last lesson when it was
+/// planned, unless the course has had another since, or any lesson went out since `since`.
 async fn publish(
     state: &AppState,
     course: &Course,
     chapter: &str,
+    after: Option<i32>,
     upkeep: Upkeep,
     since: DateTime<Utc>,
     finished: &Finished,
@@ -623,21 +625,30 @@ async fn publish(
     {
         return Err(AppError::Conflict("刚写过一课".into()));
     }
+    // A lesson written meanwhile, by another process perhaps, has taken this one's place, and
+    // this one was planned without it.
+    let last: Option<i32> = sqlx::query_scalar("SELECT max(number) FROM lessons WHERE course = $1")
+        .bind(&course.id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if last != after {
+        return Err(AppError::Conflict("这门课刚有了新的一课".into()));
+    }
     let id = Uuid::new_v4();
-    let number: i32 = sqlx::query_scalar(
+    let number = after.unwrap_or(0) + 1;
+    sqlx::query(
         "INSERT INTO lessons (id, course, number, chapter, title, body, excerpt, review_at)
-         VALUES ($1, $2, (SELECT COALESCE(max(number), 0) + 1 FROM lessons WHERE course = $2),
-                 $3, $4, $5, $6, now() + make_interval(days => $7))
-         RETURNING number",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(days => $8))",
     )
     .bind(id)
     .bind(&course.id)
+    .bind(number)
     .bind(chapter)
     .bind(&finished.title)
     .bind(&finished.body)
     .bind(&finished.excerpt)
     .bind(upkeep.review_days)
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
     keep(&mut tx, id, finished.pictures.iter().chain(&finished.cover)).await?;
     // The cover must be one of the lesson's pictures, which exist only now.

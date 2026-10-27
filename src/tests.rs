@@ -19,6 +19,9 @@ struct Mock {
     base: String,
     /// The next upload fails.
     refuse: Arc<AtomicBool>,
+    /// While the next new lesson is written, another one goes into its course.
+    interject: Arc<AtomicBool>,
+    pool: sqlx::PgPool,
 }
 
 fn reply(text: Value, cited: &[&str]) -> Json<Value> {
@@ -53,6 +56,23 @@ async fn responses(State(mock): State<Mock>, Json(body): Json<Value>) -> Json<Va
         .unwrap()
         .push((name.clone(), body.clone()));
     let input = body["input"][0]["content"].as_str().unwrap_or_default();
+    if name == "lesson"
+        && !input.contains("这一课的现有全文")
+        && mock.interject.swap(false, Ordering::SeqCst)
+    {
+        sqlx::query(
+            // Its time is its transaction's start, before this run began: only its number tells.
+            "INSERT INTO lessons (id, course, number, chapter, title, body, excerpt, review_at,
+                                  published_at, updated_at)
+             SELECT gen_random_uuid(), 'rust-web', max(number) + 1, '起步', '别处写成的一课', '正文',
+                    '正文', now() + interval '30 days', now() - interval '1 hour',
+                    now() - interval '1 hour'
+             FROM lessons WHERE course = 'rust-web'",
+        )
+        .execute(&mock.pool)
+        .await
+        .unwrap();
+    }
     match name.as_str() {
         "course" => reply(
             json!({ "id": "rust-web", "group": "实战项目", "title": "Rust 网站实战",
@@ -141,12 +161,12 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .await
         .unwrap();
     assert!(name.starts_with("learn_test"), "{name}");
-    pool.close().await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let asked: Asked = Arc::default();
     let refuse = Arc::new(AtomicBool::new(false));
+    let interject = Arc::new(AtomicBool::new(false));
     let mock = Router::new()
         .route("/v1/responses", post(responses))
         .route("/v1/images/generations", post(images))
@@ -155,6 +175,8 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
             asked: asked.clone(),
             base: base.clone(),
             refuse: refuse.clone(),
+            interject: interject.clone(),
+            pool,
         });
     let gateway = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
     let config = Config {
@@ -236,6 +258,23 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .await
         .unwrap();
     assert_eq!(lessons, 2);
+    // A lesson another process wrote meanwhile takes this one's place, so this one, planned
+    // without it, is not published.
+    interject.store(true, Ordering::SeqCst);
+    let raced = writer::step(&state, Utc::now()).await;
+    assert!(matches!(
+        &raced,
+        Err(crate::error::AppError::Conflict(message)) if message == "这门课刚有了新的一课"
+    ));
+    let numbers: Vec<i32> = sqlx::query_scalar("SELECT number FROM lessons ORDER BY number")
+        .fetch_all(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(numbers, [1, 2, 3]);
+    sqlx::query("DELETE FROM lessons WHERE number = 3")
+        .execute(&state.pool)
+        .await
+        .unwrap();
 
     // The pages.
     let site = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

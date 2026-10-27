@@ -126,27 +126,29 @@ pub(crate) fn cited(reply: &Value) -> Vec<String> {
         .collect()
 }
 
-/// What a reply cost, for the log.
+/// What a reply cost, for the log: its tokens, and the searches its output shows it ran.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct Usage {
     #[serde(default)]
     pub(crate) input_tokens: i64,
     #[serde(default)]
     pub(crate) output_tokens: i64,
-    #[serde(default)]
-    pub(crate) server_side_tool_usage_details: Tools,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct Tools {
-    #[serde(default)]
-    pub(crate) web_search_calls: i64,
+    #[serde(skip)]
+    pub(crate) web_searches: usize,
 }
 
 impl Usage {
     /// A missing or malformed block counts as nothing; it only feeds the log.
     pub(crate) fn of(reply: &Value) -> Self {
-        Self::deserialize(&reply["usage"]).unwrap_or_default()
+        Self {
+            web_searches: reply["output"].as_array().map_or(0, |output| {
+                output
+                    .iter()
+                    .filter(|item| item["type"] == "web_search_call")
+                    .count()
+            }),
+            ..Self::deserialize(&reply["usage"]).unwrap_or_default()
+        }
     }
 }
 
@@ -154,8 +156,7 @@ impl std::ops::AddAssign for Usage {
     fn add_assign(&mut self, other: Self) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
-        self.server_side_tool_usage_details.web_search_calls +=
-            other.server_side_tool_usage_details.web_search_calls;
+        self.web_searches += other.web_searches;
     }
 }
 
@@ -217,5 +218,17 @@ mod tests {
             "annotations":[{"type":"url_citation","url":"https://docs.example.com/a"},
                            {"type":"file_citation","url":"https://other.example.com"}]}]}]});
         assert_eq!(cited(&reply), ["https://docs.example.com/a"]);
+    }
+
+    #[test]
+    fn the_searches_are_counted_from_the_output() {
+        let reply = json!({"output":[{"type":"web_search_call"},{"type":"message"},
+            {"type":"web_search_call"}], "usage":{"input_tokens":7,"output_tokens":3}});
+        let usage = Usage::of(&reply);
+        assert_eq!(
+            (usage.input_tokens, usage.output_tokens, usage.web_searches),
+            (7, 3, 2)
+        );
+        assert_eq!(Usage::of(&json!({})).web_searches, 0);
     }
 }

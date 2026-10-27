@@ -872,7 +872,7 @@ fn log(id: Uuid, done: &str, course: &Course, finished: &Finished, usage: &Usage
         %id, course = course.id.as_str(), title = finished.title, pictures = finished.pictures.len(),
         cover = finished.cover.is_some(), input_tokens = usage.input_tokens,
         output_tokens = usage.output_tokens,
-        web_searches = usage.server_side_tool_usage_details.web_search_calls,
+        web_searches = usage.web_searches,
         "{done}"
     );
 }

@@ -220,7 +220,7 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Result<Respo
         .map(|(_, updated)| *updated)
         .max();
     let mut content = format!(
-        "<section class=hero><h1>系统地学 AI 与硬件开发</h1><p class=lead>XABC 写的系列课程，从入门到实战，一课接一课往前走。每 15 分钟写成或修订一课，内容以官方最新文档为准。</p><p class=stats>{} 门课 · {lessons} 课{}</p></section><div class=map>",
+        "<section class=hero><h1>系统地学 AI 与硬件开发</h1><p class=lead>XABC 写的系列课程，从入门到实战，一课接一课往前走。</p><p class=stats>{} 门课 · {lessons} 课{}</p></section><div class=map>",
         courses.len(),
         updated
             .map(|at| format!(" · 最近更新 {}", time(&state, at, "%m-%d %H:%M")))

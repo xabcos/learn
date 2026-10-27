@@ -1,6 +1,6 @@
 # learn
 
-[learn.xabcnews.com](https://learn.xabcnews.com)（XABC 学习）是一个只做一件事的网站：系统地学 AI 与硬件开发。课程由 XABC 一课接一课地写，并按官方最新文档持续修订。它是 [xabcnews.com](https://xabcnews.com) 的姊妹站，2026-10-27 从 news 的「学习」板块独立出来，原有课程连同课文、配图和课号一起迁了过来。
+[learn.xabcnews.com](https://learn.xabcnews.com)（XABC 学习）是一个只做一件事的网站：系统地学 AI 与硬件开发。课程由 XABC 一课接一课地写，并按官方最新文档持续修订。
 
 ## 网站
 

@@ -68,9 +68,8 @@ impl AppState {
         self.config.writer
     }
 
-    /// Starts XABC writing, unless it is writing already.
-    pub(crate) fn begin_writing(&self) -> bool {
-        !self.writing.swap(true, Ordering::AcqRel)
+    pub(crate) fn start_writing(&self) {
+        self.writing.store(true, Ordering::Release);
     }
 
     pub(crate) fn end_writing(&self) {
@@ -100,7 +99,7 @@ impl AppState {
 }
 
 async fn run_migrations(config: &Config) -> Result<()> {
-    let migrator = sqlx::migrate::Migrator::new(config.migrations_dir.clone()).await?;
+    let migrator = sqlx::migrate::Migrator::new(std::path::Path::new("migrations")).await?;
     // Schema changes may outlast the runtime statement timeout, so they get a pool of their own.
     let pool = PgPoolOptions::new()
         .max_connections(1)

@@ -237,7 +237,7 @@ struct Discovery {
 
 /// Once a week, unless `MOST` courses show, the model searches the field against the courses and
 /// may name one more, which is designed and stands. It must rest on pages its search found.
-pub(crate) async fn discover(state: &AppState) -> Result<Option<String>> {
+pub(crate) async fn discover(state: &AppState) -> Result<()> {
     let today = Utc::now()
         .with_timezone(&state.config.timezone)
         .date_naive();
@@ -246,16 +246,14 @@ pub(crate) async fn discover(state: &AppState) -> Result<Option<String>> {
             .fetch_optional(&state.pool)
             .await?;
     if last.is_some_and(|last| last + Duration::days(DISCOVERY_DAYS) > today) {
-        return Ok(None);
+        return Ok(());
     }
     let shown: i64 = sqlx::query_scalar("SELECT count(*) FROM courses WHERE visible")
         .fetch_one(&state.pool)
         .await?;
-    let opened = if shown < MOST {
-        look(state).await?
-    } else {
-        None
-    };
+    if shown < MOST {
+        look(state).await?;
+    }
     sqlx::query(
         "INSERT INTO tasks (name, done_on) VALUES ('discovery', $1)
          ON CONFLICT (name) DO UPDATE SET done_on = EXCLUDED.done_on",
@@ -263,10 +261,10 @@ pub(crate) async fn discover(state: &AppState) -> Result<Option<String>> {
     .bind(today)
     .execute(&state.pool)
     .await?;
-    Ok(opened)
+    Ok(())
 }
 
-async fn look(state: &AppState) -> Result<Option<String>> {
+async fn look(state: &AppState) -> Result<()> {
     let courses: Vec<(String, String)> =
         sqlx::query_as("SELECT title, intro FROM courses ORDER BY place")
             .fetch_all(&state.pool)
@@ -303,15 +301,15 @@ async fn look(state: &AppState) -> Result<Option<String>> {
     .await?;
     let idea = discovery.idea.trim();
     if idea.is_empty() {
-        return Ok(None);
+        return Ok(());
     }
     if !grounded(&discovery.sources, &ai::cited(&reply)) {
         tracing::info!(idea, sources = ?discovery.sources, "XABC's course idea rests on too little");
-        return Ok(None);
+        return Ok(());
     }
     let id = open(state, idea, "discovery").await?;
     tracing::info!(id, idea, "XABC opened a course it found");
-    Ok(Some(id))
+    Ok(())
 }
 
 /// Whether the pages an idea names include `EVIDENCE` the search itself cited.

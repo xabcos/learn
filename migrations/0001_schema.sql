@@ -45,7 +45,6 @@ CREATE TABLE images (
     id uuid PRIMARY KEY,
     lesson uuid NOT NULL REFERENCES lessons (id) ON DELETE CASCADE,
     url text NOT NULL,
-    content_type text NOT NULL,
     width integer NOT NULL CHECK (width > 0),
     height integer NOT NULL CHECK (height > 0),
     expires_at timestamptz NOT NULL

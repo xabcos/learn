@@ -2,14 +2,13 @@
 //! `/{course}/{number}` reads a lesson with its course's contents on its left and its own sections
 //! on its right. Every page is the same for every reader and is cached as one.
 use crate::{
-    courses::{self, Course, Listed},
+    courses::{self, Course, Listed, absolute},
     error::{AppError, Result},
     markdown::{self, Section, Shown, escape},
     state::AppState,
 };
 use axum::{
     Router,
-    body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
@@ -24,8 +23,8 @@ use uuid::Uuid;
 /// The site's name.
 const SITE: &str = "XABC 学习";
 /// Asset versions, raised when a file changes so caches take the new one.
-const STYLES: &str = "/assets/styles.css?v=1";
-const SCRIPT: &str = "/assets/learn.js?v=1";
+const STYLES: &str = "/assets/styles.css?v=2";
+const SCRIPT: &str = "/assets/learn.js?v=2";
 const PUBLIC_CACHE: HeaderValue =
     HeaderValue::from_static("public, max-age=60, stale-while-revalidate=300");
 /// Lessons new or revised within this many days lead a course's page, unless they are all it has.
@@ -42,64 +41,40 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/{course}/{number}", get(lesson))
 }
 
-/// A page ready to serve, and its validator.
-struct Rendered {
-    body: Bytes,
-    etag: String,
-}
-
-impl Rendered {
-    fn new(body: String) -> Self {
-        let digest = Sha256::digest(body.as_bytes());
-        let mut etag = String::with_capacity(34);
-        etag.push('"');
-        for byte in digest.iter().take(16) {
-            let _ = write!(etag, "{byte:02x}");
-        }
-        etag.push('"');
-        Self {
-            body: Bytes::from(body),
-            etag,
-        }
-    }
-}
-
 /// Serves a page, or 304 when the reader already holds this exact one. Proxies that recompress
 /// the body (Cloudflare does) weaken the tag to W/"…", which still compares equal.
 fn conditional(headers: &HeaderMap, body: String, content_type: &'static str) -> Response {
-    let rendered = Rendered::new(body);
+    let mut etag = String::with_capacity(34);
+    etag.push('"');
+    for byte in Sha256::digest(body.as_bytes()).iter().take(16) {
+        let _ = write!(etag, "{byte:02x}");
+    }
+    etag.push('"');
     let unchanged = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| {
             value.split(',').any(|candidate| {
                 let candidate = candidate.trim();
-                candidate == "*"
-                    || candidate.strip_prefix("W/").unwrap_or(candidate) == rendered.etag
+                candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
             })
         });
     let mut response = if unchanged {
         StatusCode::NOT_MODIFIED.into_response()
     } else {
-        ([(header::CONTENT_TYPE, content_type)], rendered.body).into_response()
+        ([(header::CONTENT_TYPE, content_type)], body).into_response()
     };
     let headers = response.headers_mut();
-    if let Ok(etag) = HeaderValue::from_str(&rendered.etag) {
-        headers.insert(header::ETAG, etag);
-    }
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("an ETag is hex in quotes"),
+    );
     headers.insert(header::CACHE_CONTROL, PUBLIC_CACHE);
     response
 }
 
 fn html(headers: &HeaderMap, page: String) -> Response {
     conditional(headers, page, "text/html; charset=utf-8")
-}
-
-fn absolute(state: &AppState, path: &str) -> String {
-    format!(
-        "{}{path}",
-        state.config.public_base_url.as_str().trim_end_matches('/')
-    )
 }
 
 fn day(state: &AppState, at: DateTime<Utc>, format: &str) -> String {
@@ -128,7 +103,7 @@ struct Head<'a> {
 }
 
 /// A whole page: the bar on top, `content`, and the footer.
-fn layout(state: &AppState, head: Head<'_>, class: &str, content: &str) -> String {
+fn layout(state: &AppState, head: Head<'_>, content: &str) -> String {
     let canonical = escape(&absolute(state, head.path));
     let title = escape(head.title);
     let description = escape(head.description);
@@ -157,19 +132,14 @@ fn layout(state: &AppState, head: Head<'_>, class: &str, content: &str) -> Strin
     } else {
         "article"
     };
-    let home = if head.path == "/" {
-        " aria-current=\"page\""
-    } else {
-        ""
-    };
     format!(
         r##"<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title><meta name="description" content="{description}"><meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfbf9"><meta name="theme-color" media="(prefers-color-scheme: dark)" content="#101216">
 <link rel="canonical" href="{canonical}"><meta property="og:type" content="{og_type}"><meta property="og:title" content="{title}"><meta property="og:description" content="{description}"><meta property="og:url" content="{canonical}"><meta property="og:site_name" content="{SITE}">{card}
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg"><link rel="stylesheet" href="{STYLES}"><script src="{SCRIPT}" defer></script>{schema}</head>
-<body class="{class}"><a class="skip" href="#main">跳到正文</a>
-<header class="top"><div class="top-inner"><a class="brand" href="/"><img src="/assets/icon.svg" alt="" width="29" height="22"><span>{SITE}</span></a><nav class="top-links" aria-label="站点"><a href="/"{home}>全部课程</a><a class="source" href="https://github.com/xabcos/learn" aria-label="源代码" title="源代码 · AGPL-3.0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg></a></nav></div></header>
+<body><a class="skip" href="#main">跳到正文</a>
+<header class="top"><div class="top-inner"><a class="brand" href="/"><img src="/assets/icon.svg" alt="" width="29" height="22"><span>{SITE}</span></a><a class="source" href="https://github.com/xabcos/learn" aria-label="源代码" title="源代码 · AGPL-3.0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg></a></div></header>
 <main id="main" class="page">{content}</main>
 <footer class="foot"><p>{SITE} · 课程由 XABC 持续编写与修订，内容以官方文档为准 · <a href="https://github.com/xabcos/learn">源代码（AGPL-3.0）</a></p></footer>
 <button class="to-top" type="button" aria-label="回到顶部" title="回到顶部" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v12"/></svg></button>
@@ -183,7 +153,7 @@ pub(crate) fn problem(status: StatusCode, message: &str) -> String {
         r##"<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>{} · {SITE}</title><link rel="icon" type="image/svg+xml" href="/assets/icon.svg"><link rel="stylesheet" href="{STYLES}"></head>
-<body class="problem"><header class="top"><div class="top-inner"><a class="brand" href="/"><img src="/assets/icon.svg" alt="" width="29" height="22"><span>{SITE}</span></a></div></header>
+<body><header class="top"><div class="top-inner"><a class="brand" href="/"><img src="/assets/icon.svg" alt="" width="29" height="22"><span>{SITE}</span></a></div></header>
 <main id="main" class="page"><section class="hero"><p class="code">{}</p><h1>{}</h1><p class="lead"><a href="/">回到全部课程</a></p></section></main></body></html>"##,
         escape(message),
         status.as_u16(),
@@ -259,7 +229,6 @@ async fn home(State(state): State<AppState>, headers: HeaderMap) -> Result<Respo
             image: None,
             schema: None,
         },
-        "home",
         &content,
     );
     Ok(html(&headers, page))
@@ -385,7 +354,7 @@ async fn course(
     }
     aside.push_str("</ol></nav>");
     let content = format!(
-        "<div class=docs>{}<div class=main>{main}</div>{}</div>",
+        "<div class=docs>{}<div>{main}</div>{}</div>",
         catalogue(&courses, &course.id),
         if chapters > 1 { aside.as_str() } else { "" }
     );
@@ -398,7 +367,6 @@ async fn course(
             image: None,
             schema: None,
         },
-        "course",
         &content,
     );
     Ok(html(&headers, page))
@@ -474,7 +442,7 @@ async fn lesson(
     let contents = contents(&course, &lessons, &numbers, number);
     let path = courses::path(&course.id, Some(number));
     let mut main = format!(
-        "<article class=\"main lesson\"><p class=crumbs><a href=\"/\">全部课程</a> › <a href=\"{}\">{}</a> › 第 {chapter} 章 {}</p><details class=toc><summary>课程目录</summary>{contents}</details>",
+        "<article><p class=crumbs><a href=\"/\">全部课程</a> › <a href=\"{}\">{}</a> › 第 {chapter} 章 {}</p><details class=toc><summary>课程目录</summary>{contents}</details>",
         courses::path(&course.id, None),
         escape(&course.title),
         escape(&lesson.chapter),
@@ -499,7 +467,7 @@ async fn lesson(
         escape(&course.title),
     );
     let content = format!(
-        "<div class=docs><nav class=side aria-label=课程目录><a class=back href=\"/\">← 全部课程</a><a class=side-course href=\"{}\">{}</a><p class=side-meta>{}</p>{contents}</nav>{main}{}</div>",
+        "<div class=\"docs lesson\"><nav class=side aria-label=课程目录><a class=back href=\"/\">← 全部课程</a><a class=side-course href=\"{}\">{}</a><p class=side-meta>{}</p>{contents}</nav>{main}{}</div>",
         courses::path(&course.id, None),
         escape(&course.title),
         size(lessons.len(), numbers.last().copied().unwrap_or_default()),
@@ -528,7 +496,6 @@ async fn lesson(
             image: cover.as_ref().map(|cover| cover.src.as_str()),
             schema: Some(schema),
         },
-        "lesson",
         &content,
     );
     Ok(html(&headers, page))

@@ -22,12 +22,11 @@ const ASSET_CACHE: &str = "public, max-age=300";
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 pub fn router(state: AppState) -> Router {
-    let assets = state.config.pages_dir.join("assets");
     Router::new()
         .merge(crate::pages::router())
         .nest_service(
             "/assets",
-            ServeDir::new(assets)
+            ServeDir::new("pages/assets")
                 .precompressed_gzip()
                 .append_index_html_on_directories(false),
         )

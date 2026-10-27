@@ -5,7 +5,6 @@
 
   for (const pre of document.querySelectorAll(".prose pre")) {
     const code = pre.querySelector("code");
-    if (!code) continue;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "copy";
@@ -29,7 +28,7 @@
   // The left column scrolls by itself, not the page.
   const side = document.querySelector(".side");
   const current = side?.querySelector("[aria-current]");
-  if (side && current) {
+  if (current) {
     side.scrollTop = current.offsetTop - side.clientHeight / 3;
   }
 
@@ -37,14 +36,14 @@
     [...document.querySelectorAll(".aside a[href^='#']")].map((link) => [link.hash.slice(1), link]),
   );
   if (links.size) {
-    const headings = [...links.keys()].map((id) => document.getElementById(id)).filter(Boolean);
+    const headings = [...links.keys()].map((id) => document.getElementById(id));
     const mark = () => {
       let active = headings[0];
       for (const heading of headings) {
         if (heading.getBoundingClientRect().top < 120) active = heading;
       }
       for (const [id, link] of links) {
-        if (id === active?.id) link.setAttribute("aria-current", "true");
+        if (id === active.id) link.setAttribute("aria-current", "true");
         else link.removeAttribute("aria-current");
       }
     };
@@ -53,13 +52,11 @@
   }
 
   const top = document.querySelector(".to-top");
-  if (top) {
-    const toggle = () => { top.hidden = scrollY < innerHeight; };
-    addEventListener("scroll", toggle, { passive: true });
-    toggle();
-    top.addEventListener("click", () => {
-      scrollTo({ top: 0 });
-      document.querySelector(".brand")?.focus({ preventScroll: true });
-    });
-  }
+  const toggle = () => { top.hidden = scrollY < innerHeight; };
+  addEventListener("scroll", toggle, { passive: true });
+  toggle();
+  top.addEventListener("click", () => {
+    scrollTo({ top: 0 });
+    document.querySelector(".brand").focus({ preventScroll: true });
+  });
 })();

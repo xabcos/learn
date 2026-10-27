@@ -1,5 +1,5 @@
 use crate::error::{AppError, Result};
-use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{env, net::SocketAddr, time::Duration};
 use url::Url;
 
 /// How the site runs, from the environment. Serving pages needs only the database; writing needs
@@ -9,8 +9,6 @@ pub struct Config {
     pub(crate) bind_addr: SocketAddr,
     pub(crate) database_url: String,
     pub(crate) database_max_connections: u32,
-    pub(crate) migrations_dir: PathBuf,
-    pub(crate) pages_dir: PathBuf,
     pub(crate) public_base_url: Url,
     pub(crate) timezone: chrono_tz::Tz,
     /// Whether XABC writes on its schedule; the commands write whenever they are run.
@@ -31,7 +29,7 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let public_base_url = url("PUBLIC_BASE_URL", "https://learn.xabcnews.com")?;
         let timezone = env_value("LEARN_TIMEZONE", "Asia/Shanghai");
-        let writer = bool_env("LEARN_WRITER", true)?;
+        let writer = writer_env()?;
         let ai_api_key = env_value("AI_API_KEY", "");
         let tmpfile_api_key = env_value("TMPFILE_API_KEY", "");
         if writer && (ai_api_key.is_empty() || tmpfile_api_key.is_empty()) {
@@ -44,8 +42,6 @@ impl Config {
             bind_addr: parse_env("BIND_ADDR", SocketAddr::from(([0, 0, 0, 0], 8788)))?,
             database_url: required_env("DATABASE_URL")?,
             database_max_connections: parse_env("DATABASE_MAX_CONNECTIONS", 10)?,
-            migrations_dir: env_value("MIGRATIONS_DIR", "migrations").into(),
-            pages_dir: env_value("PAGES_DIR", "pages").into(),
             public_base_url,
             timezone: timezone
                 .parse()
@@ -86,13 +82,13 @@ fn parse_env<T: std::str::FromStr>(name: &str, default: T) -> Result<T> {
     }
 }
 
-fn bool_env(name: &str, default: bool) -> Result<bool> {
-    match optional_env(name).as_deref() {
-        None => Ok(default),
-        Some("1" | "true" | "yes" | "on") => Ok(true),
+/// `LEARN_WRITER`, on unless it says otherwise.
+fn writer_env() -> Result<bool> {
+    match optional_env("LEARN_WRITER").as_deref() {
+        None | Some("1" | "true" | "yes" | "on") => Ok(true),
         Some("0" | "false" | "no" | "off") => Ok(false),
         Some(_) => Err(AppError::Config(
-            format!("环境变量 {name} 只能是 true 或 false").into(),
+            "环境变量 LEARN_WRITER 只能是 true 或 false".into(),
         )),
     }
 }

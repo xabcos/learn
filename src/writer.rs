@@ -9,7 +9,7 @@ pub(crate) mod design;
 
 use crate::{
     ai::{self, Usage},
-    courses::{self, Course, Listed},
+    courses::{self, Course, Listed, absolute},
     error::{AppError, Result},
     markdown,
     media::{self, Picture},
@@ -106,9 +106,7 @@ async fn tick(state: &AppState) {
             return;
         }
     }
-    if !state.begin_writing() {
-        return;
-    }
+    state.start_writing();
     let worker = state.clone();
     state.spawn_worker(async move {
         let outcome = tokio::select! {
@@ -721,13 +719,12 @@ async fn keep<'a>(
 ) -> Result<()> {
     for picture in pictures {
         sqlx::query(
-            "INSERT INTO images (id, lesson, url, content_type, width, height, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO images (id, lesson, url, width, height, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(picture.id)
         .bind(lesson)
         .bind(&picture.url)
-        .bind(media::CONTENT_TYPE)
         .bind(picture.width)
         .bind(picture.height)
         .bind(picture.expires_at)
@@ -747,13 +744,6 @@ fn own(state: &AppState, course: &Course, lessons: &[Listed]) -> Vec<String> {
         )
         .filter_map(|path| identity(&absolute(state, &path)))
         .collect()
-}
-
-fn absolute(state: &AppState, path: &str) -> String {
-    format!(
-        "{}{path}",
-        state.config.public_base_url.as_str().trim_end_matches('/')
-    )
 }
 
 /// For a lesson written before the course was turned: how, and that it follows.

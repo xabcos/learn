@@ -52,10 +52,8 @@ button { font: inherit; color: inherit; }
 .top { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px); }
 .top-inner { display: flex; align-items: center; gap: 1.5rem; max-width: 84rem; height: 3.6rem; margin: 0 auto; padding: 0 clamp(1rem, 3vw, 2rem); }
 .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; font-size: 1.05rem; letter-spacing: .01em; text-decoration: none; }
-.top-links { display: flex; align-items: center; gap: 1.4rem; margin-left: auto; font-size: .92rem; }
-.top-links a { color: var(--muted); text-decoration: none; }
-.top-links a:hover, .top-links a[aria-current] { color: var(--text); }
-.top-links .source { display: flex; }
+.source { display: flex; margin-left: auto; color: var(--muted); }
+.source:hover { color: var(--text); }
 
 .page { max-width: 84rem; margin: 0 auto; padding: 0 clamp(1rem, 3vw, 2rem) 4rem; }
 .foot { max-width: 84rem; margin: 0 auto; padding: 2rem clamp(1rem, 3vw, 2rem) 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
@@ -187,8 +185,7 @@ button { font: inherit; color: inherit; }
 .to-top[hidden] { display: none; }
 
 @media (max-width: 640px) {
-  .top-links { gap: 1rem; font-size: .85rem; }
-  .top-links .source { display: none; }
+  .source { display: none; }
   .courses a { flex-direction: column; gap: .15rem; }
   .course-meta { margin-left: 0; }
   .prose { font-size: 1.02rem; line-height: 1.85; }

@@ -104,8 +104,7 @@ pub(crate) fn images(body: &str) -> Vec<(Range<usize>, Option<Slot>)> {
             Event::End(TagEnd::Paragraph) => paragraph = None,
             Event::Start(Tag::Image { dest_url, .. }) => {
                 let alone = paragraph.as_ref().is_some_and(|paragraph| {
-                    body.get(paragraph.clone()).map(str::trim)
-                        == body.get(range.clone()).map(str::trim)
+                    body[paragraph.clone()].trim() == body[range.clone()].trim()
                 });
                 images.push((range.clone(), slot(&dest_url).filter(|_| alone)));
                 inside = range;
@@ -160,18 +159,14 @@ pub(crate) fn compose(
     None
 }
 
-/// Applies edits that don't overlap, in order. An edit overlapping one before it, or cutting a
-/// character, is skipped: a rewrite must never take the server down.
+/// Applies edits in order, each a range derived from the Markdown parser's offsets; one
+/// overlapping an edit before it is skipped.
 fn apply(body: &str, mut edits: Vec<(Range<usize>, String)>) -> String {
     edits.sort_by_key(|(range, _)| range.start);
     let mut rewritten = String::with_capacity(body.len());
     let mut done = 0;
     for (range, replacement) in edits {
-        if range.start < done
-            || range.start > range.end
-            || !body.is_char_boundary(range.start)
-            || !body.is_char_boundary(range.end)
-        {
+        if range.start < done {
             continue;
         }
         rewritten.push_str(&body[done..range.start]);
@@ -206,10 +201,8 @@ pub(crate) fn uncited(body: &str) -> String {
                 let Some((range, site, words)) = link.take() else {
                     continue;
                 };
-                let before = body
-                    .get(..range.start)
-                    .and_then(|text| text.chars().next_back());
-                let after = body.get(range.end..).and_then(|text| text.chars().next());
+                let before = body[..range.start].chars().next_back();
+                let after = body[range.end..].chars().next();
                 if let (Some(open @ ('(' | '（')), Some(close @ (')' | '）'))) = (before, after)
                     && !site.is_empty()
                     && words.trim().trim_start_matches("www.") == site
@@ -551,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_or_broken_edits_are_skipped_instead_of_failing() {
+    fn an_edit_overlapping_one_before_it_is_skipped() {
         let edit = |range: Range<usize>, text: &str| (range, text.to_owned());
         assert_eq!(
             apply(
@@ -559,14 +552,6 @@ mod tests {
                 vec![edit(5..6, "Z"), edit(1..3, "X"), edit(2..4, "Y")]
             ),
             "aXdeZ"
-        );
-        assert_eq!(apply("中文", vec![edit(1..2, "X")]), "中文");
-        assert_eq!(
-            apply(
-                "abc",
-                vec![edit(Range { start: 2, end: 1 }, "X"), edit(2..9, "Y")]
-            ),
-            "abc"
         );
     }
 

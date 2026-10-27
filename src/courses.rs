@@ -102,6 +102,14 @@ pub(crate) fn path(course: &str, number: Option<i32>) -> String {
     }
 }
 
+/// A path on the site as the world reaches it.
+pub(crate) fn absolute(state: &AppState, path: &str) -> String {
+    format!(
+        "{}{path}",
+        state.config.public_base_url.as_str().trim_end_matches('/')
+    )
+}
+
 /// Shows or hides a course: a hidden one is neither listed nor extended, and its lessons stay.
 pub(crate) async fn set_visible(state: &AppState, id: &str, visible: bool) -> Result<bool> {
     Ok(sqlx::query("UPDATE courses SET visible = $2 WHERE id = $1")

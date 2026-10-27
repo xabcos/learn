@@ -28,7 +28,7 @@ pub(crate) struct Picture {
 }
 
 /// Every picture is a JPEG.
-pub(crate) const CONTENT_TYPE: &str = "image/jpeg";
+const CONTENT_TYPE: &str = "image/jpeg";
 
 /// A picture drawn to `prompt` and kept. A drawing slot is held from the request to the upload.
 pub(crate) async fn drawn(state: &AppState, prompt: &str) -> Result<Picture> {
@@ -39,26 +39,25 @@ pub(crate) async fn drawn(state: &AppState, prompt: &str) -> Result<Picture> {
         .await
         .map_err(|_| AppError::Internal("服务正在关闭".into()))?;
     let png = ai::draw(state, prompt).await?;
-    let jpeg = tokio::task::spawn_blocking(move || jpeg(&png, DRAWN_SIDE))
+    let (jpeg, width, height) = tokio::task::spawn_blocking(move || jpeg(&png, DRAWN_SIDE))
         .await
         .map_err(|_| AppError::Internal("图片转换失败".into()))?
         .ok_or_else(|| AppError::Internal("图像模型返回的图片读不出来".into()))?;
-    let (width, height) =
-        dimensions(&jpeg).ok_or_else(|| AppError::Internal("转换后的图片读不出来".into()))?;
     let stored = upload(state, jpeg).await?;
     Ok(Picture {
         id: Uuid::new_v4(),
         url: stored.direct_link,
-        width: i32::try_from(width).unwrap_or(i32::MAX),
-        height: i32::try_from(height).unwrap_or(i32::MAX),
+        // Both sides are DRAWN_SIDE at most.
+        width: width as i32,
+        height: height as i32,
         expires_at: stored.expires_at,
     })
 }
 
 /// The picture as a JPEG at most `max_side` pixels on its longer side, transparency laid on
-/// white. The whole file is decoded under size and memory limits, so a picture that can't be
-/// read, or is too small to be one, gives `None`.
-pub(crate) fn jpeg(bytes: &[u8], max_side: u32) -> Option<Vec<u8>> {
+/// white, with its width and height. The whole file is decoded under size and memory limits, so
+/// a picture that can't be read, or is too small to be one, gives `None`.
+pub(crate) fn jpeg(bytes: &[u8], max_side: u32) -> Option<(Vec<u8>, u32, u32)> {
     use image::ImageDecoder;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
@@ -93,16 +92,7 @@ pub(crate) fn jpeg(bytes: &[u8], max_side: u32) -> Option<Vec<u8>> {
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 88)
         .encode_image(&decoded)
         .ok()?;
-    Some(jpeg)
-}
-
-/// The size a picture's header gives.
-pub(crate) fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()?
-        .into_dimensions()
-        .ok()
+    Some((jpeg, decoded.width(), decoded.height()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,12 +159,14 @@ mod tests {
 
     #[test]
     fn a_drawing_becomes_a_jpeg_within_its_size() {
-        let converted = jpeg(&png(1536, 1024, 255), 768).unwrap();
+        let (converted, width, height) = jpeg(&png(1536, 1024, 255), 768).unwrap();
         assert_eq!(
             image::guess_format(&converted).unwrap(),
             image::ImageFormat::Jpeg
         );
-        assert_eq!(dimensions(&converted), Some((768, 512)));
+        assert_eq!((width, height), (768, 512));
+        let decoded = image::load_from_memory(&converted).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (768, 512));
         // Transparency is laid on white, and a sliver or garbage is no picture.
         assert!(jpeg(&png(400, 400, 0), 2048).is_some());
         assert!(jpeg(&png(100, 1000, 255), 2048).is_none());

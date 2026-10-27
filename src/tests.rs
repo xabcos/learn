@@ -183,8 +183,6 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         database_url,
         database_max_connections: 4,
-        migrations_dir: "migrations".into(),
-        pages_dir: "pages".into(),
         public_base_url: "https://learn.example.com".parse().unwrap(),
         timezone: chrono_tz::Asia::Shanghai,
         writer: false,

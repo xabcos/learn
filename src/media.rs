@@ -137,7 +137,12 @@ async fn upload(state: &AppState, jpeg: Vec<u8>) -> Result<Stored> {
     {
         let _ = link.set_scheme("https");
     }
-    if link.origin() != base.origin() || stored.expires_at <= Utc::now() {
+    if !matches!(link.scheme(), "http" | "https")
+        || !link.username().is_empty()
+        || link.password().is_some()
+        || link.origin() != base.origin()
+        || stored.expires_at <= Utc::now()
+    {
         return Err(AppError::Internal("tmpfile 返回的地址不可用".into()));
     }
     Ok(Stored {

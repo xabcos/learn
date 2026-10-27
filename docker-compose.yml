@@ -1,4 +1,5 @@
 # learn.xabcnews.com. Secrets come from .env next to this file (mode 0600), never from here.
+# LEARN_DB_PASSWORD goes into DATABASE_URL as it is: letters and digits only.
 services:
   learn:
     container_name: learn

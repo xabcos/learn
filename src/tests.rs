@@ -5,7 +5,10 @@ use crate::{commands, config::Config, state::AppState, web, writer};
 use axum::{Json, Router, body::Bytes, extract::State, http::StatusCode, routing::post};
 use chrono::Utc;
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// What the mock gateway was asked, by schema name, in order.
 type Asked = Arc<Mutex<Vec<(String, Value)>>>;
@@ -14,6 +17,8 @@ type Asked = Arc<Mutex<Vec<(String, Value)>>>;
 struct Mock {
     asked: Asked,
     base: String,
+    /// The next upload fails.
+    refuse: Arc<AtomicBool>,
 }
 
 fn reply(text: Value, cited: &[&str]) -> Json<Value> {
@@ -101,17 +106,20 @@ async fn images(State(mock): State<Mock>) -> Json<Value> {
     Json(json!({ "data": [{ "b64_json": base64::engine::general_purpose::STANDARD.encode(png) }] }))
 }
 
-async fn upload(State(mock): State<Mock>, body: Bytes) -> Json<Value> {
+async fn upload(State(mock): State<Mock>, body: Bytes) -> Result<Json<Value>, StatusCode> {
     assert!(body.len() > 1000, "the upload carries the picture");
+    if mock.refuse.swap(false, Ordering::SeqCst) {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
     let count = {
         let mut asked = mock.asked.lock().unwrap();
         asked.push(("upload".into(), Value::Null));
         asked.iter().filter(|(name, _)| name == "upload").count()
     };
-    Json(json!({
+    Ok(Json(json!({
         "direct_link": format!("{}/files/{count}.jpg", mock.base),
         "expires_at": (Utc::now() + chrono::Duration::days(365)).to_rfc3339(),
-    }))
+    })))
 }
 
 fn times(asked: &Asked, name: &str) -> usize {
@@ -138,6 +146,7 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let asked: Asked = Arc::default();
+    let refuse = Arc::new(AtomicBool::new(false));
     let mock = Router::new()
         .route("/v1/responses", post(responses))
         .route("/v1/images/generations", post(images))
@@ -145,6 +154,7 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .with_state(Mock {
             asked: asked.clone(),
             base: base.clone(),
+            refuse: refuse.clone(),
         });
     let gateway = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
     let config = Config {
@@ -206,6 +216,27 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .unwrap();
     assert_eq!(pictures, 2);
 
+    // The next lesson follows in the same course. A picture tmpfile refuses is left out; the
+    // lesson goes out with the other.
+    refuse.store(true, Ordering::SeqCst);
+    let done = writer::step(&state, Utc::now()).await.unwrap().to_string();
+    assert!(done.contains("新课 /rust-web/2"), "{done}");
+    let pictures: i64 = sqlx::query_scalar("SELECT count(*) FROM images")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(pictures, 3);
+    // Another lesson within the window is refused when it comes to be published.
+    let refused = writer::step(&state, Utc::now() - chrono::Duration::hours(1)).await;
+    assert!(
+        matches!(&refused, Err(crate::error::AppError::Conflict(message)) if message == "刚写过一课")
+    );
+    let lessons: i64 = sqlx::query_scalar("SELECT count(*) FROM lessons")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(lessons, 2);
+
     // The pages.
     let site = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", site.local_addr().unwrap());
@@ -222,16 +253,17 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
             .starts_with("public")
     );
     let home = home.text().await.unwrap();
-    assert!(home.contains("Rust 网站实战") && home.contains("1 课"));
+    assert!(home.contains("Rust 网站实战") && home.contains("2 课"));
     let course = get("/rust-web").await.unwrap().text().await.unwrap();
     assert!(course.contains("第 1 章") && course.contains("第一个路由"));
     let lesson = get("/rust-web/1").await.unwrap().text().await.unwrap();
     assert!(lesson.contains(&format!("{base}/files/")));
     assert!(lesson.contains("<h2 id=\"s1\">概念</h2>"));
     assert!(lesson.contains("aria-current=\"page\""));
+    assert!(lesson.contains("<a rel=next href=\"/rust-web/2\">"));
     assert!(lesson.contains("\"@type\":\"Article\""));
     for missing in [
-        "/rust-web/2",
+        "/rust-web/3",
         "/rust-web/x",
         "/nope",
         "/nope/1",
@@ -285,7 +317,7 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .fetch_one(&state.pool)
         .await
         .unwrap();
-    assert_eq!(pictures, 3);
+    assert_eq!(pictures, 4);
 
     // Turning the course with a sentence brings every lesson due again.
     let said = commands::run(
@@ -300,7 +332,7 @@ async fn postgres_courses_are_opened_written_revised_turned_and_hidden() {
         .fetch_one(&state.pool)
         .await
         .unwrap();
-    assert_eq!(due, 1);
+    assert_eq!(due, 2);
 
     // A hidden course is neither shown nor written.
     commands::run(&state, "hide", &["rust-web".into()])

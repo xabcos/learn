@@ -28,8 +28,6 @@ use std::{
 use tokio::{task::JoinSet, time::Instant};
 use uuid::Uuid;
 
-/// XABC's mark among the jobs running: one lesson at a time.
-const JOB: &str = "writer";
 /// XABC writes again a quarter of an hour after its last lesson or revision.
 const INTERVAL: chrono::Duration = chrono::Duration::minutes(15);
 /// How often the schedule looks whether a lesson is due.
@@ -95,7 +93,7 @@ pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
 
 async fn tick(state: &AppState) {
     let now = Utc::now();
-    if progress(|progress| progress.next > now) || state.running(JOB) {
+    if progress(|progress| progress.next > now) || state.writing() {
         return;
     }
     match last(state).await {
@@ -108,7 +106,7 @@ async fn tick(state: &AppState) {
             return;
         }
     }
-    if !state.begin(JOB) {
+    if !state.begin_writing() {
         return;
     }
     let worker = state.clone();
@@ -127,7 +125,7 @@ async fn tick(state: &AppState) {
                 progress(|progress| progress.failed(Utc::now()));
             }
         }
-        worker.end(JOB);
+        worker.end_writing();
     });
 }
 
@@ -606,6 +604,11 @@ async fn publish(
     finished: &Finished,
 ) -> Result<(Uuid, i32)> {
     let mut tx = state.pool.begin().await?;
+    // Publications take turns, whichever course and process they come from, so two can't both
+    // find nothing published since `since`.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('learn:publish'))")
+        .execute(&mut *tx)
+        .await?;
     let shown = sqlx::query_as("SELECT visible, adjusted_at FROM courses WHERE id = $1 FOR UPDATE")
         .bind(&course.id)
         .fetch_optional(&mut *tx)

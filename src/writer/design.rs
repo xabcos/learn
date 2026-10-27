@@ -10,7 +10,7 @@ use crate::{
     error::{AppError, Result},
     state::AppState,
 };
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use std::{collections::HashSet, fmt::Write};
@@ -144,8 +144,8 @@ struct Turn {
 /// The model rewrites a course to `change`, keeping its address and group. When the change makes
 /// what its lessons say wrong, they come due for revision, which tells the writer of the change.
 pub(crate) async fn turn(state: &AppState, id: &str, change: &str) -> Result<bool> {
-    let (title, intro, brief): (String, String, String) =
-        sqlx::query_as("SELECT title, intro, brief FROM courses WHERE id = $1")
+    let (title, intro, brief, adjusted_at): (String, String, String, Option<DateTime<Utc>>) =
+        sqlx::query_as("SELECT title, intro, brief, adjusted_at FROM courses WHERE id = $1")
             .bind(id)
             .fetch_optional(&state.pool)
             .await?
@@ -195,12 +195,17 @@ pub(crate) async fn turn(state: &AppState, id: &str, change: &str) -> Result<boo
         return Err(AppError::Internal("课程调整的字段为空或过长".into()));
     }
     // A lesson being saved holds the course's row; the turn comes after it, so that lesson counts
-    // as written before the turn (`writer::steady` refuses one saving after).
+    // as written before the turn (`writer::steady` refuses one saving after). A turn saved since
+    // this one read the brief wins: this one was written over the brief before it.
     let mut tx = state.pool.begin().await?;
-    sqlx::query("SELECT 1 FROM courses WHERE id = $1 FOR UPDATE")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    let current: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT adjusted_at FROM courses WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if current != adjusted_at {
+        return Err(AppError::Conflict("课程刚被调整过，请再说一次".into()));
+    }
     sqlx::query(
         "UPDATE courses SET title = $2, intro = $3, brief = $4, direction = $5,
              adjusted_at = clock_timestamp(),

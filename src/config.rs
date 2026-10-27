@@ -31,6 +31,15 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let public_base_url = url("PUBLIC_BASE_URL", "https://learn.xabcnews.com")?;
         let timezone = env_value("LEARN_TIMEZONE", "Asia/Shanghai");
+        let writer = bool_env("LEARN_WRITER", true)?;
+        let ai_api_key = env_value("AI_API_KEY", "");
+        let tmpfile_api_key = env_value("TMPFILE_API_KEY", "");
+        if writer && (ai_api_key.is_empty() || tmpfile_api_key.is_empty()) {
+            return Err(AppError::Config(
+                "按时写课需要 AI_API_KEY 和 TMPFILE_API_KEY；只运行网站时设 LEARN_WRITER=false"
+                    .into(),
+            ));
+        }
         Ok(Self {
             bind_addr: parse_env("BIND_ADDR", SocketAddr::from(([0, 0, 0, 0], 8788)))?,
             database_url: required_env("DATABASE_URL")?,
@@ -41,14 +50,14 @@ impl Config {
             timezone: timezone
                 .parse()
                 .map_err(|_| AppError::Config(format!("未知的时区 {timezone}").into()))?,
-            writer: bool_env("LEARN_WRITER", true)?,
+            writer,
             ai_base_url: url("AI_BASE_URL", "https://api.zairouter.com")?,
-            ai_api_key: env_value("AI_API_KEY", ""),
+            ai_api_key,
             ai_model: env_value("AI_MODEL", "gpt-6-astra"),
             ai_image_model: env_value("AI_IMAGE_MODEL", "gpt-image-2.5-flare"),
             ai_timeout: Duration::from_secs(parse_env("AI_TIMEOUT_SECS", 1800)?),
             tmpfile_base_url: url("TMPFILE_BASE_URL", "https://dl.xabcnews.com")?,
-            tmpfile_api_key: env_value("TMPFILE_API_KEY", ""),
+            tmpfile_api_key,
         })
     }
 }

@@ -1,9 +1,11 @@
 use crate::{config::Config, error::Result};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{
-    collections::HashSet,
     future::Future,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::Semaphore;
@@ -21,8 +23,8 @@ pub struct AppState {
     /// The AI gateway and tmpfile, both configured and trusted.
     pub(crate) http: reqwest::Client,
     pub(crate) config: Arc<Config>,
-    /// What runs in the background now: XABC writing, or a course being designed.
-    jobs: Arc<Mutex<HashSet<&'static str>>>,
+    /// Whether XABC is writing a lesson on its schedule: one at a time.
+    writing: Arc<AtomicBool>,
     pub(crate) drawing_slots: Arc<Semaphore>,
     /// Cancels the schedule and the workers before the process exits.
     pub(crate) shutdown: CancellationToken,
@@ -54,7 +56,7 @@ impl AppState {
             pool,
             http,
             config: Arc::new(config),
-            jobs: Arc::default(),
+            writing: Arc::default(),
             drawing_slots: Arc::new(Semaphore::new(DRAWING_SLOTS)),
             shutdown: CancellationToken::new(),
             workers: TaskTracker::new(),
@@ -66,21 +68,17 @@ impl AppState {
         self.config.writer
     }
 
-    /// Takes the mark for `job`, unless it is taken: one of each runs at a time.
-    pub(crate) fn begin(&self, job: &'static str) -> bool {
-        self.jobs().insert(job)
+    /// Starts XABC writing, unless it is writing already.
+    pub(crate) fn begin_writing(&self) -> bool {
+        !self.writing.swap(true, Ordering::AcqRel)
     }
 
-    pub(crate) fn end(&self, job: &'static str) {
-        self.jobs().remove(job);
+    pub(crate) fn end_writing(&self) {
+        self.writing.store(false, Ordering::Release);
     }
 
-    pub(crate) fn running(&self, job: &'static str) -> bool {
-        self.jobs().contains(job)
-    }
-
-    fn jobs(&self) -> MutexGuard<'_, HashSet<&'static str>> {
-        self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
+    pub(crate) fn writing(&self) -> bool {
+        self.writing.load(Ordering::Acquire)
     }
 
     pub(crate) fn spawn_worker<F>(&self, future: F)
